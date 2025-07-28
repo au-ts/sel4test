@@ -16,7 +16,6 @@
 #include <limits.h>
 
 #include <sel4runtime.h>
-
 #include <allocman/bootstrap.h>
 #include <allocman/vka.h>
 
@@ -66,6 +65,27 @@ static sel4utils_alloc_data_t data;
 
 /* environment encapsulating allocation interfaces etc */
 struct driver_env env;
+
+/* @kwinter: THIS IS A BIG HACK, FIND A MORE PRINCIPLED WAY TO DO THIS! */
+typedef struct acpi_rsdp {
+    char         signature[8];
+    uint8_t      checksum;
+    char         oem_id[6];
+    uint8_t      revision;
+    uint32_t     rsdt_address;
+    uint32_t     length;
+    uint64_t     xsdt_address;
+    uint8_t      extended_checksum;
+    char         reserved[3];
+} PACKED acpi_rsdp_t;
+
+typedef struct acpi_sel4_bootinfo {
+    seL4_BootInfoHeader header;
+    acpi_rsdp_t rsdp;
+} PACKED acpi_sel4_bootinfo_t;
+
+acpi_sel4_bootinfo_t rsdp_bootinfo;
+
 /* list of untypeds to give out to test processes */
 static vka_object_t untypeds[CONFIG_MAX_NUM_BOOTINFO_UNTYPED_CAPS];
 /* list of sizes (in bits) corresponding to untyped */
@@ -175,9 +195,14 @@ static void init_timer(void)
 {
     if (config_set(CONFIG_HAVE_TIMER)) {
         int error;
+        ssize_t acpi_len = simple_get_extended_bootinfo_length(&env.simple, SEL4_BOOTINFO_HEADER_X86_ACPI_RSDP);
+        int copied_len = simple_get_extended_bootinfo(&env.simple, SEL4_BOOTINFO_HEADER_X86_ACPI_RSDP, &rsdp_bootinfo, sizeof(acpi_sel4_bootinfo_t));
+        if (copied_len == -1) {
+            ZF_LOGE("Could not find the ACPI RSDP field in the bootinfo stucture!\n");
+        }
 
         /* setup the timers and have our wrapper around simple capture the IRQ caps */
-        error = ltimer_default_init(&env.ltimer, env.ops, NULL, NULL);
+        error = ltimer_default_init(&env.ltimer, env.ops, NULL, &rsdp_bootinfo.rsdp);
         ZF_LOGF_IF(error, "Failed to setup the timers");
 
         error = vka_alloc_notification(&env.vka, &env.timer_notify_test);
