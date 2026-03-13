@@ -292,3 +292,80 @@ test_notification_binding_with_sc(env_t env)
 }
 DEFINE_TEST(BIND006, "Test passing thread notification binding with a scheduling context",
             test_notification_binding_with_sc, config_set(CONFIG_KERNEL_MCS))
+
+void bind_007_helper(seL4_CPtr notification, volatile int *state)
+{
+    *state = 1;
+    seL4_Wait(notification, NULL);
+    *state = 2;
+}
+
+static int
+test_active_notification_binding(env_t env)
+{
+    seL4_CPtr notification;
+    int error;
+    helper_thread_t helper;
+    volatile int state = 0;
+
+    notification = vka_alloc_notification_leaky(&env->vka);
+
+    ZF_LOGE("setting up helper thread\n");
+
+    create_helper_thread(env, &helper);
+    NAME_THREAD(helper.thread.tcb.cptr, "bind0007_helper");
+
+    /* set our prio lower so the helper thread runs when we start it */
+    set_helper_priority(env, &helper, 10);
+    error = seL4_TCB_SetPriority(env->tcb, env->tcb, 9);
+    test_eq(error, seL4_NoError);
+
+    ZF_LOGE("helper bound tcb notification\n");
+
+    /* bind tcb to the notification */
+    error = seL4_TCB_BindNotification(helper.thread.tcb.cptr, notification);
+    test_eq(error, seL4_NoError);
+
+    ZF_LOGE("helper thread starting\n");
+
+    /* start the helper so that it waits on the notification */
+    start_helper(env, &helper, (helper_fn_t) bind_007_helper, notification,
+                 (seL4_Word) &state, 0, 0);
+    test_eq(state, 1);
+
+    ZF_LOGE("helper thread blocked on ntfn: ntfn will be in wait state\n");
+
+    seL4_DebugDumpScheduler();
+
+    ZF_LOGE("helper thread SC unbound\n");
+
+    /* remove its tcb-bound sc */
+    error = api_sc_unbind(helper.thread.sched_context.cptr);
+    test_eq(error, seL4_NoError);
+
+    seL4_DebugDumpScheduler();
+
+    ZF_LOGE("notification is signalled\n");
+
+    /* signal the notification */
+    seL4_Signal(notification);
+
+    seL4_DebugDumpScheduler();
+
+    ZF_LOGE("helper thread bound to ntfn\n");
+
+    /* bind the SC to the notification */
+    error = api_sc_bind(helper.thread.sched_context.cptr, notification);
+    test_eq(error, seL4_NoError);
+
+    seL4_DebugDumpScheduler();
+
+    /* now it should have got the signal */
+    test_eq(state, 2);
+
+    return sel4test_get_result();
+}
+// XX: this description is wrong. the notification never ends up active
+//     this is a different, related, but not a bug issue.
+DEFINE_TEST(BIND007, "Test binding to an active notification",
+            test_active_notification_binding, config_set(CONFIG_KERNEL_MCS))
