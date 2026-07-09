@@ -7,7 +7,6 @@
 #include <assert.h>
 
 #include <sel4/sel4.h>
-#include <vka/object.h>
 #include <vka/capops.h>
 
 #include "../helpers.h"
@@ -33,20 +32,21 @@ typedef struct iopt_cptrs {
 } iopt_cptrs_t;
 
 #define FAKE_PCI_DEVICE 0x216u
-#define DOMAIN_ID       0xf
+#define DOMAIN_ID 0xf
 
 #ifdef CONFIG_IOMMU
 
-static int map_iopt_from_iospace(env_t env, seL4_CPtr iospace, iopt_cptrs_t *pts, seL4_CPtr *frame)
+static int
+map_iopt_from_iospace(env_t env, seL4_CPtr iospace, iopt_cptrs_t *pts, seL4_CPtr *frame, seL4_Word frame_bits)
 {
     int error = seL4_NoError;
 
     pts->depth = 0;
     /* Allocate and map page tables until we can map a frame */
-    *frame = vka_alloc_frame_leaky(&env->vka, seL4_PageBits);
+    *frame = vka_alloc_frame_leaky(&env->vka, frame_bits);
     test_assert(*frame);
 
-    while (seL4_X86_Page_MapIO(*frame, iospace, seL4_AllRights, IOPT_MAP_BASE) == seL4_FailedLookup) {
+    while ((error = seL4_X86_Page_MapIO(*frame, iospace, seL4_AllRights, IOPT_MAP_BASE)) == seL4_FailedLookup) {
         test_assert(pts->depth < MAX_IOPT_DEPTH);
         pts->pts[pts->depth] = vka_alloc_io_page_table_leaky(&env->vka);
         test_assert(pts->pts[pts->depth]);
@@ -59,7 +59,8 @@ static int map_iopt_from_iospace(env_t env, seL4_CPtr iospace, iopt_cptrs_t *pts
     return error;
 }
 
-static int map_iopt_set(env_t env, seL4_CPtr *iospace, iopt_cptrs_t *pts, seL4_CPtr *frame)
+static int
+map_iopt_set(env_t env, seL4_CPtr *iospace, iopt_cptrs_t *pts, seL4_CPtr *frame, seL4_Word frame_bits)
 {
     int error;
     cspacepath_t master_path, iospace_path;
@@ -73,24 +74,26 @@ static int map_iopt_set(env_t env, seL4_CPtr *iospace, iopt_cptrs_t *pts, seL4_C
     error = vka_cnode_mint(&iospace_path, &master_path, seL4_AllRights, (DOMAIN_ID << 16) | FAKE_PCI_DEVICE);
     test_eq(error, seL4_NoError);
 
-    error = map_iopt_from_iospace(env, *iospace, pts, frame);
+    error = map_iopt_from_iospace(env, *iospace, pts, frame, frame_bits);
 
     return error;
 }
 
-static void delete_iospace(env_t env, seL4_CPtr iospace)
+static void
+delete_iospace(env_t env, seL4_CPtr iospace)
 {
     cspacepath_t path;
     vka_cspace_make_path(&env->vka, iospace, &path);
     vka_cnode_delete(&path);
 }
 
-static int test_iopt_basic_iopt(env_t env)
+static int
+test_iopt_basic_iopt(env_t env)
 {
     int error;
     seL4_CPtr iospace, frame;
     iopt_cptrs_t pts;
-    error = map_iopt_set(env, &iospace, &pts, &frame);
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     delete_iospace(env, iospace);
@@ -105,7 +108,7 @@ test_iopt_basic_map_unmap(env_t env)
     int i;
     iopt_cptrs_t pts;
     seL4_CPtr iospace, frame;
-    error = map_iopt_set(env, &iospace, &pts, &frame);
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     error = seL4_X86_Page_Unmap(frame);
@@ -115,7 +118,7 @@ test_iopt_basic_map_unmap(env_t env)
         test_eq(error, seL4_NoError);
     }
 
-    error = map_iopt_from_iospace(env, iospace, &pts, &frame);
+    error = map_iopt_from_iospace(env, iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     for (i = 0; i < pts.depth; i++) {
@@ -137,7 +140,7 @@ test_iopt_no_overlapping_4k(env_t env)
     int error;
     iopt_cptrs_t pts;
     seL4_CPtr iospace, frame;
-    error = map_iopt_set(env, &iospace, &pts, &frame);
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     frame = vka_alloc_frame_leaky(&env->vka, seL4_PageBits);
@@ -156,7 +159,7 @@ test_iopt_map_remap_top_pt(env_t env)
     int error;
     iopt_cptrs_t pts;
     seL4_CPtr iospace, frame, pt;
-    error = map_iopt_set(env, &iospace, &pts, &frame);
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     /* unmap the top PT */
@@ -184,7 +187,7 @@ test_iopt_no_overlapping_pt(env_t env)
     int error;
     iopt_cptrs_t pts;
     seL4_CPtr iospace, frame, pt;
-    error = map_iopt_set(env, &iospace, &pts, &frame);
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     /* Mapping in a new PT should fail */
@@ -204,7 +207,7 @@ test_iopt_map_remap_pt(env_t env)
     int error;
     iopt_cptrs_t pts;
     seL4_CPtr iospace, frame;
-    error = map_iopt_set(env, &iospace, &pts, &frame);
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_PageBits);
     test_eq(error, seL4_NoError);
 
     /* unmap the pt */
@@ -226,12 +229,78 @@ test_iopt_map_remap_pt(env_t env)
 }
 DEFINE_TEST(IOPT0011, "Test IOPT map and remap PT", test_iopt_map_remap_pt, true)
 
+static int
+test_iopt_map_remap_large_pt(env_t env)
+{
+    int error;
+    iopt_cptrs_t pts;
+    seL4_CPtr iospace, frame;
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_LargePageBits);
+    test_eq(error, seL4_NoError);
+
+    /* unmap the pt */
+    error = seL4_X86_IOPageTable_Unmap(pts.pts[pts.depth - 1]);
+    test_eq(error, seL4_NoError);
+
+    /* now map it back in */
+    error = seL4_X86_IOPageTable_Map(pts.pts[pts.depth - 1], iospace, IOPT_MAP_BASE);
+    test_eq(error, seL4_NoError);
+
+    /* it should retain its old mappings, and mapping in a new frame should fail */
+    frame = vka_alloc_frame_leaky(&env->vka, seL4_LargePageBits);
+    test_assert(frame);
+    error = seL4_X86_Page_MapIO(frame, iospace, seL4_AllRights, IOPT_MAP_BASE);
+    test_assert(error != seL4_NoError);
+
+    delete_iospace(env, iospace);
+    return sel4test_get_result();
+}
+DEFINE_TEST(IOPT0012, "Test IOPT map and remap large PT", test_iopt_map_remap_large_pt, true)
+
+static int
+test_iopt_no_overlapping_2MiB(env_t env)
+{
+    int error;
+    iopt_cptrs_t pts;
+    seL4_CPtr iospace, frame;
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_LargePageBits);
+    test_eq(error, seL4_NoError);
+
+    frame = vka_alloc_frame_leaky(&env->vka, seL4_LargePageBits);
+    test_assert(frame);
+    error = seL4_X86_Page_MapIO(frame, iospace, seL4_AllRights, IOPT_MAP_BASE);
+    test_assert(error != seL4_NoError);
+
+    delete_iospace(env, iospace);
+    return sel4test_get_result();
+}
+DEFINE_TEST(IOPT0013, "Test IOPT cannot map overlapping 2MiB pages", test_iopt_no_overlapping_2MiB, true)
+
+static int
+test_iopt_no_overlapping_4K_on_2MiB(env_t env)
+{
+    int error;
+    iopt_cptrs_t pts;
+    seL4_CPtr iospace, frame;
+    error = map_iopt_set(env, &iospace, &pts, &frame, seL4_LargePageBits);
+    test_eq(error, seL4_NoError);
+
+    frame = vka_alloc_frame_leaky(&env->vka, seL4_PageBits);
+    test_assert(frame);
+    error = seL4_X86_Page_MapIO(frame, iospace, seL4_AllRights, IOPT_MAP_BASE);
+    test_assert(error != seL4_NoError);
+
+    delete_iospace(env, iospace);
+    return sel4test_get_result();
+}
+DEFINE_TEST(IOPT0014, "Test IOPT cannot map overlapping 4KiB page ontop of a 2MiB page",
+            test_iopt_no_overlapping_4K_on_2MiB, true)
 #endif /* CONFIG_IOMMU */
 
 #ifdef CONFIG_TK1_SMMU
 /* tests for ARM SystemMMU */
 
-#define IOPT_MAP_BASE   0x10000000
+#define IOPT_MAP_BASE 0x10000000
 
 static int
 map_iopt_from_iospace(env_t env, seL4_CPtr iospace, seL4_CPtr *iopt, seL4_CPtr *frame)
@@ -252,24 +321,25 @@ map_iopt_from_iospace(env_t env, seL4_CPtr iospace, seL4_CPtr *iopt, seL4_CPtr *
     test_eq(error, seL4_NoError);
 
     return error;
-
 }
 
-static int map_iopt_set(env_t env, seL4_CPtr iospace, seL4_CPtr *iopt_cptr, seL4_CPtr *frame)
+static int
+map_iopt_set(env_t env, seL4_CPtr iospace, seL4_CPtr *iopt_cptr, seL4_CPtr *frame)
 {
     int error = map_iopt_from_iospace(env, iospace, iopt_cptr, frame);
     return error;
-
 }
 
-static void delete_iospace(env_t env, seL4_CPtr iospace)
+static void
+delete_iospace(env_t env, seL4_CPtr iospace)
 {
     cspacepath_t path;
     vka_cspace_make_path(&env->vka, iospace, &path);
     vka_cnode_delete(&path);
 }
 
-static int test_iopt_basic_iopt(env_t env)
+static int
+test_iopt_basic_iopt(env_t env)
 {
     int error;
     seL4_CPtr pt = 0;
@@ -287,7 +357,8 @@ static int test_iopt_basic_iopt(env_t env)
 }
 DEFINE_TEST(IOPT0001, "Testing basic ARM IOPT mapping", test_iopt_basic_iopt, true);
 
-static int test_iopt_basic_map_unmap(env_t env)
+static int
+test_iopt_basic_map_unmap(env_t env)
 {
     int error;
     int i;
