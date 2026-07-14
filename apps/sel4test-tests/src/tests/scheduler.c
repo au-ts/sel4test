@@ -1887,7 +1887,7 @@ static int test_changing_affinity_remote(struct env *env)
     /* wait for it to start helper */
     seL4_Wait(ntfn, NULL);
 
-    for (volatile int i = 0; i < 1000; i++) { }
+    for (volatile int i = 0; i < 100000; i++) { }
 
     uint64_t local_count_0 = counter;
     /* it should have run some amount */
@@ -1900,7 +1900,7 @@ static int test_changing_affinity_remote(struct env *env)
     /* should have incremented some more */
     test_gt(local_count_1, local_count_0);
 
-    for (volatile int i = 0; i < 1000; i++) { }
+    for (volatile int i = 0; i < 100000; i++) { }
 
     /* it should still be incrementing */
     uint64_t local_count_2 = counter;
